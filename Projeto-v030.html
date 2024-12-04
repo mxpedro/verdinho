@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verdinho</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
+    <style>
+        #map { width: 100%; height: calc(100vh - 60px); }
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        header {
+            padding: 10px;
+            background-color: #28a745;
+            color: white;
+            text-align: center;
+            font-size: 18px;
+        }
+        #controls {
+            padding: 10px;
+            text-align: center;
+            background-color: #f4f4f4;
+            border-bottom: 1px solid #ccc;
+        }
+        #controls input {
+            padding: 8px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 70%;
+        }
+        #controls button {
+            padding: 8px 16px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #28a745;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        #controls button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <header>Mapa Interativo - Sugestão de Plantas</header>
+    <div id="controls">
+        <input type="text" id="searchBox" placeholder="Digite um endereço ou coordenadas">
+        <button onclick="searchLocation()">Buscar</button>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        const OWM_API_KEY = "ed5dbe9896c14fb2526e2c777a124718";
+        const GRID_SIZE = 50;
+        const SQUARE_SIZE = 0.005;
+        let map;
+
+        async function fetchWeatherData(lat, lon) {
+            const weatherURL = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OWM_API_KEY}&units=metric&lang=pt_br`;
+            try {
+                const response = await fetch(weatherURL);
+                return response.ok ? await response.json() : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function suggestPlants(temp, humidity, weatherDescription) {
+            if (temp > 30 && humidity < 50) {
+                return ["Cacto", "Agave", "Bougainvillea"];
+            } else if (temp > 20 && weatherDescription.includes("chuva")) {
+                return ["Palmeira", "Fícus", "Samambaia"];
+            } else if (temp < 15) {
+                return ["Pinheiro", "Cedro", "Álamo"];
+            } else {
+                return ["Ipê", "Jacarandá", "Manacá-da-Serra"];
+            }
+        }
+
+        function createInfoWindowContent(data, lat, lon) {
+            if (!data) return "Carregando dados...";
+            const { temp, humidity } = data.main;
+            const weatherDescription = data.weather[0]?.description || "Sem descrição";
+            const plants = suggestPlants(temp, humidity, weatherDescription);
+            const lastUpdate = new Date(data.dt * 1000).toLocaleString();
+
+            return `
+                <div>
+                    <strong>Coordenadas:</strong> [${lat.toFixed(4)}, ${lon.toFixed(4)}]<br>
+                    <strong>Última Atualização:</strong> ${lastUpdate}<br>
+                    <strong>Descrição do Clima:</strong> ${weatherDescription}<br>
+                    <strong>Temperatura:</strong> ${temp} °C<br>
+                    <strong>Umidade:</strong> ${humidity}%<br>
+                    <strong>Plantas Sugeridas:</strong> ${plants.join(", ")}<br>
+                    <button onclick="exportToPDF(${lat}, ${lon}, '${weatherDescription}', ${temp}, ${humidity}, '${plants.join(", ")}')">
+                        Exportar para PDF
+                    </button>
+                </div>
+            `;
+        }
+
+        function exportToPDF(lat, lon, weatherDescription, temp, humidity, plants) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            doc.text(`Relatório de Clima e Plantas - Coordenadas: [${lat.toFixed(4)}, ${lon.toFixed(4)}]`, 10, 10);
+            doc.text(`Descrição do Clima: ${weatherDescription}`, 10, 20);
+            doc.text(`Temperatura: ${temp} °C`, 10, 30);
+            doc.text(`Umidade: ${humidity}%`, 10, 40);
+            doc.text(`Plantas Sugeridas: ${plants}`, 10, 50);
+
+            doc.save(`Relatorio_${lat.toFixed(4)}_${lon.toFixed(4)}.pdf`);
+        }
+
+        function searchLocation() {
+            const input = document.getElementById("searchBox").value;
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(input)}`)
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.length > 0) {
+                        const [result] = data;
+                        const { lat, lon } = result;
+                        map.setView([lat, lon], 14);
+                    } else {
+                        alert("Localização não encontrada. Verifique o endereço ou as coordenadas.");
+                    }
+                });
+        }
+
+        function initializeMap() {
+            map = L.map("map").setView([-22.95, -43.38], 12);
+
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors',
+            }).addTo(map);
+
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const lat = -22.95 + i * SQUARE_SIZE;
+                    const lon = -43.38 + j * SQUARE_SIZE;
+
+                    const rectangle = L.rectangle([
+                        [lat, lon],
+                        [lat + SQUARE_SIZE, lon + SQUARE_SIZE],
+                    ], {
+                        color: "#28a745",
+                        weight: 1,
+                        fillOpacity: 0.2,
+                    }).addTo(map);
+
+                    rectangle.on("click", async () => {
+                        const data = await fetchWeatherData(lat, lon);
+                        const popupContent = createInfoWindowContent(data, lat, lon);
+                        rectangle.bindPopup(popupContent).openPopup();
+                    });
+                }
+            }
+        }
+
+        initializeMap();
+    </script>
+</body>
+</html>
