@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa Interativo com Relatório Completo</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
+    <style>
+        #map { width: 100%; height: 100vh; }
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        .popup-buttons { text-align: center; margin-top: 16px; }
+        .popup-buttons button {
+            display: block;
+            margin: 8px auto;
+            padding: 8px 16px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #28a745;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s, transform 0.2s;
+        }
+        .popup-buttons button:hover {
+            background-color: #218838;
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        const NASA_API_KEY = "5S0zPWKJSZ4BGfLsdFZ3K4cngI3R07mKMVXccd3e";
+        const OWM_API_KEY = "ed5dbe9896c14fb2526e2c777a124718";
+        const GRID_SIZE = 50;
+        const SQUARE_SIZE = 0.005;
+
+        const GRID_WIDTH = GRID_SIZE * SQUARE_SIZE;
+        const GRID_HEIGHT = GRID_SIZE * SQUARE_SIZE;
+        const START_COORDINATE = {
+            lat: -22.95 - GRID_HEIGHT * 0.25,
+            lon: -43.38 - GRID_WIDTH * 0.5,
+        };
+
+        async function fetchWeatherAndAirData(lat, lon) {
+            const weatherURL = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OWM_API_KEY}&units=metric&lang=pt_br`;
+            try {
+                const weatherResponse = await fetch(weatherURL);
+                return weatherResponse.ok ? await weatherResponse.json() : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function generatePopupContent(data, lat, lon) {
+            if (!data) return "Carregando dados...";
+            const { temp, humidity, temp_max, temp_min } = data.main;
+            const weatherDescription = data.weather[0]?.description || "Sem descrição";
+            const lastUpdate = new Date(data.dt * 1000).toLocaleString();
+
+            return `
+                <div>
+                    <strong>Coordenadas Geográficas:</strong> [${lat.toFixed(4)}, ${lon.toFixed(4)}]<br>
+                    <strong>Última Atualização:</strong> ${lastUpdate}<br>
+                    <strong>Descrição do Clima:</strong> ${weatherDescription}<br>
+                    <strong>Temperatura:</strong> ${temp} °C<br>
+                    <strong>Umidade:</strong> ${humidity}%<br>
+                    <div class="popup-buttons">
+                        <button onclick="toggleInfo('extra-info-${lat}-${lon}')">Mostrar Mais</button>
+                    </div>
+                    <div id="extra-info-${lat}-${lon}" style="display:none;">
+                        <hr>
+                        <strong>Sensação Térmica:</strong> ${data.main.feels_like} °C<br>
+                        <strong>Chuva:</strong> ${data.rain ? `${data.rain["1h"]} mm/h` : "Sem dados"}<br>
+                        <strong>Direção do Vento:</strong> ${data.wind.deg || "Sem dados"}°<br>
+                        <strong>Velocidade do Vento:</strong> ${data.wind.speed || "Sem dados"} m/s<br>
+                        <strong>Visibilidade:</strong> ${(data.visibility / 1000).toFixed(1)} km<br>
+                        <strong>Nebulosidade:</strong> ${data.clouds.all}%<br>
+                        <strong>Temperatura Máxima:</strong> ${temp_max} °C<br>
+                        <strong>Temperatura Mínima:</strong> ${temp_min} °C<br>
+                        <strong>Nascer do Sol:</strong> ${new Date(data.sys.sunrise * 1000).toLocaleTimeString()}<br>
+                        <strong>Pôr do Sol:</strong> ${new Date(data.sys.sunset * 1000).toLocaleTimeString()}<br>
+                        <div class="popup-buttons">
+                            <button onclick="openReportPopup(${lat}, ${lon}, '${weatherDescription}', ${temp}, ${humidity}, ${temp_max}, ${temp_min}, '${lastUpdate}', ${data.main.feels_like}, ${(data.visibility / 1000).toFixed(1)}, ${data.clouds.all}, ${data.wind.speed || 0}, ${data.wind.deg || 0}, '${new Date(data.sys.sunrise * 1000).toLocaleTimeString()}', '${new Date(data.sys.sunset * 1000).toLocaleTimeString()}')">Gerar Relatório</button>
+                            <button onclick="toggleInfo('extra-info-${lat}-${lon}')">Mostrar Menos</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleInfo(id) {
+            const section = document.getElementById(id);
+            if (section.style.display === "none") {
+                section.style.display = "block";
+                section.previousElementSibling.style.display = "none";
+            } else {
+                section.style.display = "none";
+                section.previousElementSibling.style.display = "block";
+            }
+        }
+
+        function openReportPopup(lat, lon, description, temp, humidity, temp_max, temp_min, lastUpdate, feels_like, visibility, clouds, wind_speed, wind_deg, sunrise, sunset) {
+            const reportDate = new Date().toLocaleString();
+            const reportWindow = window.open("", "_blank", "width=600,height=800");
+            reportWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Relatório de ${reportDate}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }
+                        h1 { text-align: center; }
+                        .centered-button button {
+                            display: inline-block;
+                            margin: 20px auto;
+                            padding: 12px 24px;
+                            font-size: 16px;
+                            background-color: #28a745;
+                            color: #fff;
+                            border: none;
+                            border-radius: 5px;
+                            cursor: pointer;
+                            transition: background-color 0.3s, transform 0.2s;
+                        }
+                        .centered-button button:hover {
+                            background-color: #218838;
+                            transform: scale(1.05);
+                        }
+                        .centered-button {
+                            text-align: center;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>Relatório de ${reportDate}</h1>
+                    <p><strong>Coordenadas Geográficas:</strong> [${lat.toFixed(4)}, ${lon.toFixed(4)}]</p>
+                    <p><strong>Última Atualização:</strong> ${lastUpdate}</p>
+                    <p><strong>Descrição do Clima:</strong> ${description}</p>
+                    <p><strong>Temperatura:</strong> ${temp} °C</p>
+                    <p><strong>Umidade:</strong> ${humidity}%</p>
+                    <p><strong>Sensação Térmica:</strong> ${feels_like} °C</p>
+                    <p><strong>Visibilidade:</strong> ${visibility} km</p>
+                    <p><strong>Nebulosidade:</strong> ${clouds}%</p>
+                    <p><strong>Velocidade do Vento:</strong> ${wind_speed} m/s</p>
+                    <p><strong>Direção do Vento:</strong> ${wind_deg}°</p>
+                    <p><strong>Temperatura Máxima:</strong> ${temp_max} °C</p>
+                    <p><strong>Temperatura Mínima:</strong> ${temp_min} °C</p>
+                    <p><strong>Nascer do Sol:</strong> ${sunrise}</p>
+                    <p><strong>Pôr do Sol:</strong> ${sunset}</p>
+                    <div class="centered-button">
+                        <button onclick="downloadPDF('${reportDate}', ${lat}, ${lon}, '${description}', ${temp}, ${humidity}, ${temp_max}, ${temp_min}, '${lastUpdate}', ${feels_like}, ${visibility}, ${clouds}, ${wind_speed}, ${wind_deg}, '${sunrise}', '${sunset}')">Baixar PDF</button>
+                    </div>
+                </body>
+                </html>
+            `);
+        }
+
+        function downloadPDF(reportDate, lat, lon, description, temp, humidity, temp_max, temp_min, lastUpdate, feels_like, visibility, clouds, wind_speed, wind_deg, sunrise, sunset) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const content = `
+                Relatório Gerado em ${reportDate}
+                Coordenadas Geográficas: [${lat.toFixed(4)}, ${lon.toFixed(4)}]
+                Última Atualização: ${lastUpdate}
+                Descrição do Clima: ${description}
+                Temperatura: ${temp} °C
+                Umidade: ${humidity}%
+                Sensação Térmica: ${feels_like} °C
+                Visibilidade: ${visibility} km
+                Nebulosidade: ${clouds}%
+                Velocidade do Vento: ${wind_speed} m/s
+                Direção do Vento: ${wind_deg}°
+                Temperatura Máxima: ${temp_max} °C
+                Temperatura Mínima: ${temp_min} °C
+                Nascer do Sol: ${sunrise}
+                Pôr do Sol: ${sunset}
+            `;
+            doc.text(content, 10, 10);
+            doc.save(`Relatório_${reportDate.replace(/[^a-zA-Z0-9]/g,"_")}.pdf`);
+        }
+
+        function initializeMap() {
+            const map = L.map('map').setView([START_COORDINATE.lat, START_COORDINATE.lon], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const lat = START_COORDINATE.lat + i * SQUARE_SIZE;
+                    const lon = START_COORDINATE.lon + j * SQUARE_SIZE;
+                    const bounds = [[lat, lon], [lat + SQUARE_SIZE, lon + SQUARE_SIZE]];
+
+                    const rectangle = L.rectangle(bounds, { color: 'green', weight: 1, fillOpacity: 0.2 })
+                        .addTo(map)
+                        .on('mouseover', function () {
+                            rectangle.bindTooltip(`Coordenadas: [${lat.toFixed(4)}, ${lon.toFixed(4)}]`).openTooltip();
+                        })
+                        .on('click', async function () {
+                            const data = await fetchWeatherAndAirData(lat, lon);
+                            rectangle.bindPopup(generatePopupContent(data, lat, lon)).openPopup();
+                        });
+                }
+            }
+        }
+
+        initializeMap();
+    </script>
+</body>
+</html>
